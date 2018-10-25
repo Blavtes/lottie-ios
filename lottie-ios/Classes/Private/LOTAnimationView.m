@@ -134,13 +134,25 @@ static NSString * const kCompContainerAnimationKey = @"play";
   self.clipsToBounds = YES;
 }
 
+- (void)_commonInit {
+  _animationSpeed = 1;
+  _animationProgress = 0;
+  _loopAnimation = NO;
+  _autoReverseAnimation = NO;
+  _playRangeEndFrame = nil;
+  _playRangeStartFrame = nil;
+  _playRangeEndProgress = 0;
+  _playRangeStartProgress = 0;
+  _shouldRasterizeWhenIdle = NO;
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(_handleWillEnterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(_handleWillEnterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+}
+
 #else
 
 - (void)_initializeAnimationContainer {
   self.wantsLayer = YES;
 }
-
-#endif
 
 - (void)_commonInit {
   _animationSpeed = 1;
@@ -151,6 +163,15 @@ static NSString * const kCompContainerAnimationKey = @"play";
   _playRangeStartFrame = nil;
   _playRangeEndProgress = 0;
   _playRangeStartProgress = 0;
+  _shouldRasterizeWhenIdle = NO;
+}
+
+#endif
+
+
+
+- (void)dealloc {
+  [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)_setupWithSceneModel:(LOTComposition *)model {
@@ -208,6 +229,44 @@ static NSString * const kCompContainerAnimationKey = @"play";
 - (BOOL)_isSpeedNegative {
   // If the animation speed is negative, then we're moving backwards.
   return _animationSpeed >= 0;
+}
+
+- (void)_handleWindowChanges:(BOOL)hasNewWindow
+{
+  // When this view or its superview is leaving the screen, e.g. a modal is presented or another
+  // screen is pushed, this method will get called with newWindow value set to nil - indicating that
+  // this view will be detached from the visible window.
+  // When a view is detached, animations will stop - but will not automatically resumed when it's
+  // re-attached back to window, e.g. when the presented modal is dismissed or another screen is
+  // pop.
+  if (hasNewWindow) {
+    // The view is being re-attached, resume animation if needed.
+    if (_shouldRestoreStateWhenAttachedToWindow) {
+      _shouldRestoreStateWhenAttachedToWindow = NO;
+      
+      _isAnimationPlaying = YES;
+      _completionBlock = _completionBlockToRestoreWhenAttachedToWindow;
+      _completionBlockToRestoreWhenAttachedToWindow = nil;
+      
+      [self performSelector:@selector(_restoreState) withObject:nil afterDelay:0 inModes:@[NSRunLoopCommonModes]];
+    }
+  } else {
+    // The view is being detached, capture information that need to be restored later.
+    if (_isAnimationPlaying) {
+      [self pause];
+      _shouldRestoreStateWhenAttachedToWindow = YES;
+      _completionBlockToRestoreWhenAttachedToWindow = _completionBlock;
+      _completionBlock = nil;
+    }
+  }
+}
+
+- (void)_handleWillEnterBackground {
+  [self _handleWindowChanges: false];
+}
+
+- (void)_handleWillEnterForeground {
+  [self _handleWindowChanges: (self.window != nil)];
 }
 
 # pragma mark - Completion Block
@@ -608,32 +667,7 @@ static NSString * const kCompContainerAnimationKey = @"play";
 }
 
 - (void)willMoveToWindow:(UIWindow *)newWindow {
-  // When this view or its superview is leaving the screen, e.g. a modal is presented or another
-  // screen is pushed, this method will get called with newWindow value set to nil - indicating that
-  // this view will be detached from the visible window.
-  // When a view is detached, animations will stop - but will not automatically resumed when it's
-  // re-attached back to window, e.g. when the presented modal is dismissed or another screen is
-  // pop.
-  if (newWindow) {
-    // The view is being re-attached, resume animation if needed.
-    if (_shouldRestoreStateWhenAttachedToWindow) {
-      _shouldRestoreStateWhenAttachedToWindow = NO;
-
-      _isAnimationPlaying = YES;
-      _completionBlock = _completionBlockToRestoreWhenAttachedToWindow;
-      _completionBlockToRestoreWhenAttachedToWindow = nil;
-
-      [self performSelector:@selector(_restoreState) withObject:nil afterDelay:0];
-    }
-  } else {
-    // The view is being detached, capture information that need to be restored later.
-    if (_isAnimationPlaying) {
-        [self pause];
-      _shouldRestoreStateWhenAttachedToWindow = YES;
-      _completionBlockToRestoreWhenAttachedToWindow = _completionBlock;
-      _completionBlock = nil;
-    }
-  }
+  [self _handleWindowChanges:(newWindow != nil)];
 }
 
 - (void)didMoveToWindow {
@@ -651,6 +685,10 @@ static NSString * const kCompContainerAnimationKey = @"play";
 }
 
 #else
+
+- (void)viewWillMoveToWindow:(NSWindow *)newWindow {
+  [self _handleWindowChanges:(newWindow != nil)];
+}
 
 - (void)viewDidMoveToWindow {
     _compContainer.rasterizationScale = self.window.screen.backingScaleFactor;
@@ -737,7 +775,7 @@ static NSString * const kCompContainerAnimationKey = @"play";
   [CATransaction commit];
 }
 
-# pragma mark - CAANimationDelegate
+# pragma mark - CAAnimationDelegate
 
 - (void)animationDidStop:(CAAnimation *)anim finished:(BOOL)complete {
   if ([_compContainer animationForKey:kCompContainerAnimationKey] == anim &&

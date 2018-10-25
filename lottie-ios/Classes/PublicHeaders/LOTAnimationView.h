@@ -77,7 +77,8 @@ typedef void (^LOTAnimationCompletionBlock)(BOOL animationFinished);
 @property (nonatomic, strong, nullable) LOTComposition *sceneModel;
 
 /// Sets sholdRasterize to YES on the animation layer to improve compositioning performance when not animating.
-/// Defaults to YES
+/// Note this will not produce crisp results at resolutions above the animations set resolution.
+/// Defaults to NO
 @property (nonatomic, assign) BOOL shouldRasterizeWhenIdle;
 
 /* 
@@ -202,7 +203,7 @@ typedef void (^LOTAnimationCompletionBlock)(BOOL animationFinished);
     toKeypathLayer:(nonnull LOTKeypath *)keypath;
 
 /*!
- @brief Adds a UIView, or NSView, to the parentrenderable layer found at the Keypath and then masks the view with layer found at the keypath.
+ @brief Adds a UIView, or NSView, to the parent renderable layer found at the Keypath and then masks the view with layer found at the keypath.
  */
 - (void)maskSubview:(nonnull LOTView *)view
      toKeypathLayer:(nonnull LOTKeypath *)keypath;
